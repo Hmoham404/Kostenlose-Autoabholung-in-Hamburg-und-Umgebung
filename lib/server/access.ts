@@ -9,7 +9,14 @@ export function rateLimit(key:string,max:number,windowMs:number){
  entry.count++;return entry.count<=max;
 }
 export function sameOrigin(request:Request){
- try{const origin=request.headers.get('origin');if(!origin)return false;const url=new URL(origin);return origin===url.origin&&['http:','https:'].includes(url.protocol)&&url.host===request.headers.get('host')}catch{return false}
+ try{
+  const origin=request.headers.get('origin');if(!origin)return false;
+  const url=new URL(origin);
+  if(origin!==url.origin||!['http:','https:'].includes(url.protocol))return false;
+  const configured=process.env.PUBLIC_SITE_ORIGIN;
+  if(configured)return origin===new URL(configured).origin;
+  return url.host===request.headers.get('host');
+ }catch{return false}
 }
 export function matchesCode(code:unknown){
  const expected=process.env.ADMIN_ACCESS_CODE;

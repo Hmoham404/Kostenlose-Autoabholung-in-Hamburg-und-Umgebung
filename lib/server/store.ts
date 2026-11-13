@@ -1,15 +1,18 @@
 import {mkdir,readFile,readdir,rename,writeFile,unlink,rmdir} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
+import * as remote from './remote-store';
 
 export type RequestRow={id:string;payload:Record<string,unknown>;photo_paths:string[];status:'new'|'review'|'accepted'|'rejected'|'scheduled'|'collected';appointment_at:string|null;created_at:string;deleted_at?:string;email_draft?:{language:'de';subject:string;text:string};email_delivery?:{state:'sending'|'sent'|'failed';key:string;sent_at?:string;to:string;message_id?:string}};
 export const validEmail=(email:unknown):email is string=>typeof email==='string'&&email.length<=254&&/^[^\s@<>\r\n]+@[^\s@<>\r\n]+\.[^\s@<>\r\n]+$/.test(email);
 const dataRoot=path.resolve(process.cwd(),'.data');
 const requestsDir=path.join(dataRoot,'requests'),photosDir=path.join(dataRoot,'photos'),trashDir=path.join(dataRoot,'trash');
 const validId=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+const hosted=()=>Boolean(process.env.VERCEL);
 async function init(){await Promise.all([mkdir(requestsDir,{recursive:true}),mkdir(photosDir,{recursive:true})])}
-export async function getRequest(id:string):Promise<RequestRow>{if(!validId(id))throw new Error('NOT_FOUND');return JSON.parse(await readFile(path.join(requestsDir,`${id}.json`),'utf8'))}
+export async function getRequest(id:string):Promise<RequestRow>{if(hosted())return remote.getRemoteRequest(id);if(!validId(id))throw new Error('NOT_FOUND');return JSON.parse(await readFile(path.join(requestsDir,`${id}.json`),'utf8'))}
 export async function writeRequest(row:RequestRow){
+ if(hosted())return remote.writeRemoteRequest(row);
  const file=path.join(requestsDir,`${row.id}.json`),temp=`${file}.${randomUUID()}.tmp`;
  await writeFile(temp,JSON.stringify(row,null,2),{encoding:'utf8',mode:0o600,flag:'wx'});
  await rename(temp,file);
@@ -28,6 +31,7 @@ function imageType(bytes:Buffer){
  throw new Error('INVALID_PHOTO');
 }
 export async function createRequest(payload:Record<string,unknown>,files:File[]){
+ if(hosted())return remote.createRemoteRequest(payload,files);
  await init();const id=randomUUID(),folder=path.join(photosDir,id);const names:string[]=[];
  const images=await Promise.all(files.map(async file=>{if(file.size>2097152||file.size===0)throw new Error('INVALID_PHOTO');const bytes=Buffer.from(await file.arrayBuffer());return {bytes,ext:imageType(bytes)}}));
  const clean:Record<string,unknown>={};
@@ -39,15 +43,17 @@ export async function createRequest(payload:Record<string,unknown>,files:File[])
    await writeRequest(row);return id;
  }catch(error){for(const name of names)await unlink(path.join(folder,name)).catch(()=>{});if(images.length)await rmdir(folder).catch(()=>{});throw error}
 }
-export async function listRequests(){await init();const names=(await readdir(requestsDir)).filter(n=>n.endsWith('.json'));const rows=await Promise.all(names.map(n=>getRequest(n.slice(0,-5))));return rows.sort((a,b)=>b.created_at.localeCompare(a.created_at)).slice(0,500)}
+export async function listRequests(){if(hosted())return remote.listRemoteRequests();await init();const names=(await readdir(requestsDir)).filter(n=>n.endsWith('.json'));const rows=await Promise.all(names.map(n=>getRequest(n.slice(0,-5))));return rows.sort((a,b)=>b.created_at.localeCompare(a.created_at)).slice(0,500)}
 export async function updateRequest(id:string,status:RequestRow['status'],appointment_at:string|null,email?:string,phone?:string,whatsapp?:string){const row=await getRequest(id);const next={...row,status,appointment_at:status==='rejected'?null:appointment_at,payload:{...row.payload,...(email!==undefined?{email}:{} ),...(phone!==undefined?{phone}:{}),...(whatsapp!==undefined?{whatsapp}:{})}};await writeRequest(next);return next}
 export async function trashRequest(id:string){
+ if(hosted())return remote.trashRemoteRequest(id);
  const row=await getRequest(id);await mkdir(trashDir,{recursive:true});
  const source=path.resolve(requestsDir,`${id}.json`),target=path.resolve(trashDir,`${id}.json`);
  if(!source.startsWith(requestsDir+path.sep)||!target.startsWith(trashDir+path.sep))throw new Error('INVALID_PATH');
  await writeRequest({...row,deleted_at:new Date().toISOString()});await rename(source,target);
 }
 export async function restoreRequest(id:string){
+ if(hosted())return remote.restoreRemoteRequest(id);
  if(!validId(id))throw new Error('NOT_FOUND');
  const source=path.resolve(trashDir,`${id}.json`),target=path.resolve(requestsDir,`${id}.json`);
  if(!source.startsWith(trashDir+path.sep)||!target.startsWith(requestsDir+path.sep))throw new Error('INVALID_PATH');
@@ -58,6 +64,7 @@ export async function restoreRequest(id:string){
 const locks=new Map<string,Promise<unknown>>();
 export async function withRequestLock<T>(id:string,work:()=>Promise<T>):Promise<T>{const previous=locks.get(id)||Promise.resolve();const next=previous.catch(()=>{}).then(work);locks.set(id,next);try{return await next}finally{if(locks.get(id)===next)locks.delete(id)}}
 export async function getPhoto(id:string,index:number){
+ if(hosted())return remote.getRemotePhoto(id,index);
  const row=await getRequest(id),name=row.photo_paths[index];
  if(!name||!/^[-a-f0-9]+\.(png|jpg|webp)$/.test(name))throw new Error('NOT_FOUND');
  return {bytes:await readFile(path.join(photosDir,id,name)),type:name.endsWith('.png')?'image/png':name.endsWith('.jpg')?'image/jpeg':'image/webp'};

@@ -33,7 +33,13 @@ export async function submitRequest(payload: Record<string, unknown>, files: Fil
   body.set('payload', JSON.stringify(clean));
   for (const source of files) body.append('photos', await compressImage(source));
   const response = await fetch('/api/requests/', { method: 'POST', body });
-  if (!response.ok) throw new Error('SAVE_FAILED');
-  const result = await response.json();
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const result = isJson ? await response.json().catch(() => null) : null;
+  if (!response.ok) {
+    const known = ['ORIGIN', 'INVALID_REQUEST', 'TOO_MANY_REQUESTS', 'SAVE_FAILED', 'STORAGE_NOT_CONFIGURED'];
+    if (known.includes(result?.error)) throw new Error(result.error);
+    throw new Error(response.status === 404 || response.status === 405 || !isJson ? 'BACKEND_NOT_READY' : 'SAVE_FAILED');
+  }
+  if (typeof result?.id !== 'string') throw new Error('BACKEND_NOT_READY');
   return result.id as string;
 }

@@ -2,7 +2,15 @@ import {NextRequest} from 'next/server';
 import {authorised,json,limitedBody,sameOrigin} from '@/lib/server/access';
 import {listRequests,updateRequest,validEmail,withRequestLock,trashRequest,restoreRequest} from '@/lib/server/store';
 export const runtime='nodejs';
-export async function GET(request:NextRequest){if(!authorised(request))return json({error:'UNAUTHORIZED'},401);try{return json({requests:await listRequests()})}catch{return json({error:'LOAD_FAILED'},500)}}
+export async function GET(request:NextRequest){
+ if(!authorised(request))return json({error:'UNAUTHORIZED'},401);
+ try{return json({requests:await listRequests()})}
+ catch(error){
+  if(error instanceof Error&&error.message==='STORAGE_NOT_CONFIGURED')return json({error:'STORAGE_NOT_CONFIGURED'},503);
+  console.error('Request list failed',error);
+  return json({error:'LOAD_FAILED'},500);
+ }
+}
 export async function PATCH(request:NextRequest){
  if(!authorised(request))return json({error:'UNAUTHORIZED'},401);
  if(!sameOrigin(request))return json({error:'ORIGIN'},403);

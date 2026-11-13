@@ -24,18 +24,18 @@ ADMIN_ACCESS_CODE=un-code-long-et-aleatoire
 ADMIN_SESSION_SECRET=une-cle-aleatoire-d-au-moins-32-caracteres
 ```
 
-Changer les valeurs dans `.env.local`, puis redémarrer le serveur. Changer la clé de session invalide également les sessions déjà émises. Le cookie de session est HttpOnly, SameSite Strict, valable 8 heures, et Secure lorsque la requête utilise HTTPS. L’accès au serveur doit conserver le Host public d’origine derrière un reverse proxy.
+Changer les valeurs dans `.env.local`, puis redémarrer le serveur. Changer la clé de session invalide également les sessions déjà émises. Le cookie de session est HttpOnly, SameSite Strict, valable 8 heures, et Secure lorsque la requête utilise HTTPS. Si un reverse proxy remplace le Host public, définir `PUBLIC_SITE_ORIGIN` avec l’origine HTTPS publique.
 
 ## Enregistrement réel des demandes
 
-La version actuelle enregistre les demandes **sur le disque du serveur**, sans dépendre de Supabase :
+En local ou sur un serveur Node.js avec disque persistant, les demandes sont enregistrées **sur le disque du serveur** :
 
 - `.data/requests/<UUID>.json` : informations du formulaire, références des photos, statut et rendez-vous.
 - `.data/photos/<UUID>/` : photos privées, servies uniquement par une route administrateur authentifiée.
 
 Les photos sont compressées dans le navigateur, limitées à 6 fichiers de 2 Mo après compression. Le serveur vérifie aussi le nombre, la taille, les signatures de fichiers et les champs du formulaire. Le JSON contient les noms de fichiers, jamais les images en base64.
 
-Sauvegarder `.data/` et le conserver sur un disque persistant. Les données sont propres à cette installation ; elles ne sont pas synchronisées avec Supabase ni entre plusieurs serveurs. Le code SQL `supabase/setup.sql` reste disponible pour une future intégration ; il n’est pas utilisé par le fonctionnement actuel. Ne pas réutiliser la clé secrète divulguée dans la conversation.
+Sauvegarder `.data/` et le conserver sur un disque persistant. Ces données ne sont pas synchronisées automatiquement avec le stockage Supabase utilisé sur Vercel. Le code SQL `supabase/setup.sql` correspond à une ancienne intégration avec comptes utilisateurs ; le déploiement Vercel utilise `supabase/vercel-storage.sql`. Ne pas réutiliser la clé secrète divulguée dans la conversation.
 
 Les limites de débit sont en mémoire du processus : 12 essais de code/minute et 30 demandes/minute au total. Pour un déploiement public, ajouter une protection anti-abus au niveau de l’hébergeur et adapter la conservation, les sauvegardes et les informations de confidentialité aux réglages réels.
 
@@ -84,7 +84,20 @@ npm run build
 npm run start
 ```
 
-Héberger le projet sur un serveur Node.js avec HTTPS, définir les deux variables privées et conserver `.data/` sur disque. Ensuite, connecter le domaine one.com avec les enregistrements DNS fournis par l’hébergeur. Un hébergement qui ne sert que des fichiers statiques ne suffit plus pour cette version.
+Sur un serveur Node.js classique, définir les deux variables privées et conserver `.data/` sur un disque persistant. Ensuite, connecter le domaine one.com avec les enregistrements DNS fournis par l’hébergeur. Un hébergement qui ne sert que des fichiers statiques ne suffit plus pour cette version.
+
+### Déploiement Vercel
+
+Les fonctions Vercel ne peuvent pas conserver `.data/`. Pour ce déploiement, le site utilise une table et un bucket **privés** dans Supabase. Dans le projet Supabase, exécuter [`supabase/vercel-storage.sql`](supabase/vercel-storage.sql) une seule fois dans SQL Editor. Dans Vercel > Project Settings > Environment Variables, définir pour **Production** :
+
+```dotenv
+ADMIN_ACCESS_CODE=un-code-long-et-aleatoire
+ADMIN_SESSION_SECRET=une-cle-aleatoire-d-au-moins-32-caracteres
+SUPABASE_URL=https://votre-projet.supabase.co
+SUPABASE_SECRET_KEY=votre-cle-secrete-supabase
+```
+
+La clé `SUPABASE_SECRET_KEY` doit rester une variable serveur, jamais une variable `NEXT_PUBLIC_`. Dans Supabase, la trouver dans Project Settings > API Keys. Déployer ensuite cette version du code sur Vercel. Les demandes enregistrées auparavant dans `.data/` sur un autre serveur ne sont pas importées automatiquement. Si un proxy remplace le nom d’hôte public, définir aussi `PUBLIC_SITE_ORIGIN=https://votre-domaine-public`.
 
 Les pages légales restent des brouillons à compléter avec l’identité complète de l’exploitant, le prestataire réel, les durées de conservation et les autres informations applicables. L’envoi de rendez-vous nécessite la configuration email décrite ci-dessus.
 

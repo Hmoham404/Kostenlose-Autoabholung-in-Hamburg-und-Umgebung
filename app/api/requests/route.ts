@@ -11,5 +11,11 @@ export async function POST(request:Request){
    const payload=JSON.parse(raw),files=form.getAll('photos');
    if(!validPayload(payload)||files.length>6||files.some(file=>typeof file==='string'))return json({error:'INVALID_REQUEST'},400);
    const id=await createRequest(payload,files as File[]);return json({id},201);
- }catch(error){const validation=error instanceof Error&&['BODY_TOO_LARGE','INVALID_PHOTO'].includes(error.message);return json({error:validation?'INVALID_REQUEST':'SAVE_FAILED'},validation?400:500)}
+ }catch(error){
+   const code=error instanceof Error?error.message:'';
+   if(['BODY_TOO_LARGE','INVALID_PHOTO'].includes(code))return json({error:'INVALID_REQUEST'},400);
+   if(code==='STORAGE_NOT_CONFIGURED')return json({error:code},503);
+   console.error('Request persistence failed',error);
+   return json({error:'SAVE_FAILED'},500);
+ }
 }
